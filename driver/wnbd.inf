@@ -50,8 +50,7 @@ LoadOrderGroup = SCSI Miniport
 AddReg         = pnpsafe_isa_addreg
 
 [pnpsafe_isa_addreg]
-HKR,,"BreakOnEntry", %REG_DWORD%,  0x00000000
-HKR,"Parameters","BusType",%REG_DWORD%,0x0000000E
+HKR,"Parameters","BusType",%REG_DWORD%,0x0000000A
 
 [Strings]
 wnbd                   = "SUSE LLC"
