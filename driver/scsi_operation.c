@@ -101,6 +101,7 @@ WnbdSetVpdSupportedPages(_In_ PVOID Data,
     VpdPages->PageLength = NumberOfSupportedPages;
     VpdPages->SupportedPageList[0] = VPD_SUPPORTED_PAGES;
     VpdPages->SupportedPageList[1] = VPD_SERIAL_NUMBER;
+    VpdPages->SupportedPageList[2] = VPD_DEVICE_IDENTIFIERS;
 
     SrbSetDataTransferLength(Srb, sizeof(VPD_SUPPORTED_PAGES_PAGE) + NumberOfSupportedPages);
 
@@ -135,6 +136,38 @@ WnbdSetVpdSerialNumber(_In_ PVOID Data,
 }
 
 UCHAR
+WnbdSetVpdDeviceIdentifier(_In_ PVOID Data,
+                           _In_ PCHAR DeviceSerial,
+                           _In_ PSCSI_REQUEST_BLOCK Srb)
+{
+    WNBD_LOG_LOUD(": Enter");
+    ASSERT(Data);
+    ASSERT(Srb);
+    PVPD_IDENTIFICATION_PAGE Id;
+    UCHAR Size = (UCHAR)strlen(DeviceSerial) + 1;
+    PVPD_IDENTIFICATION_DESCRIPTOR IdDescriptor;
+
+    Id = Data;
+    Id->DeviceType = DIRECT_ACCESS_DEVICE;
+    Id->DeviceTypeQualifier = DEVICE_QUALIFIER_ACTIVE;
+    Id->PageCode = VPD_DEVICE_IDENTIFIERS;
+    Id->PageLength = Size + sizeof(VPD_IDENTIFICATION_DESCRIPTOR);
+
+    IdDescriptor = (PVPD_IDENTIFICATION_DESCRIPTOR)Id->Descriptors;
+    IdDescriptor->CodeSet = VpdCodeSetAscii;
+    IdDescriptor->IdentifierType = VpdIdentifierTypeFCPHName;
+    IdDescriptor->Association = VpdAssocDevice;
+    IdDescriptor->IdentifierLength = Size;
+    RtlCopyMemory(IdDescriptor->Identifier, DeviceSerial, Size);
+
+    SrbSetDataTransferLength(Srb, sizeof(VPD_IDENTIFICATION_PAGE) +
+        sizeof(VPD_IDENTIFICATION_DESCRIPTOR) + Size);
+
+    WNBD_LOG_LOUD(": Exit");
+    return SRB_STATUS_SUCCESS;
+}
+
+UCHAR
 WnbdProcessExtendedInquiry(_In_ PVOID Data,
                            _In_ ULONG Length,
                            _In_ PSCSI_REQUEST_BLOCK Srb,
@@ -147,8 +180,10 @@ WnbdProcessExtendedInquiry(_In_ PVOID Data,
     ASSERT(Cdb);
 
     UCHAR SrbStatus = SRB_STATUS_SUCCESS;
-    UCHAR NumberOfSupportedPages = 2;
+    UCHAR NumberOfSupportedPages = 3;
     UCHAR MaxSerialNumberSize = sizeof(VPD_SERIAL_NUMBER_PAGE) + sizeof(UCHAR[36]);
+    UCHAR MaxDeviceNumberSize = sizeof(VPD_IDENTIFICATION_PAGE) +
+        sizeof(VPD_IDENTIFICATION_DESCRIPTOR) + sizeof(UCHAR[36]);
     UCHAR MaxVpdSuportedPage = sizeof(VPD_SUPPORTED_PAGES_PAGE) + NumberOfSupportedPages;
 
     switch (Cdb->CDB6INQUIRY3.PageCode) {
@@ -171,8 +206,19 @@ WnbdProcessExtendedInquiry(_In_ PVOID Data,
                                            Srb);
         }
         break;
+    case VPD_DEVICE_IDENTIFIERS:
+        {
+        if (MaxDeviceNumberSize > Length) {
+            SrbStatus = SRB_STATUS_DATA_OVERRUN;
+            goto Exit;
+        }
+        SrbStatus = WnbdSetVpdDeviceIdentifier(Data,
+                                               Info->UserEntry->UserInformation.SerialNumber,
+                                               Srb);
+        }
+        break;
     default:
-        WNBD_LOG_ERROR("Unknown VPD Page: %u", Cdb->CDB6INQUIRY3.PageCode);
+        WNBD_LOG_ERROR("Unknown VPD Page: 0x%x", Cdb->CDB6INQUIRY3.PageCode);
         break;
     }
 
@@ -428,7 +474,7 @@ WnbdHandleSrbOperation(PVOID DeviceExtension,
         return status;
     }
 
-    WNBD_LOG_LOUD("Processing %s command",
+    WNBD_LOG_INFO("Processing %s command",
                   WnbdToStringSrbCdbOperation(Cdb->AsByte[0]));
 
     switch (Cdb->AsByte[0]) {
@@ -467,6 +513,9 @@ WnbdHandleSrbOperation(PVOID DeviceExtension,
         break;
 
     default:
+        WNBD_LOG_INFO(": Unknown %s command. SRB = 0x%p. CDB = 0x%x. PathId: %d TargetId: %d LUN: %d",
+                  WnbdToStringSrbCdbOperation(SrbGetCdb(Srb)->AsByte[0]),
+                  Srb, SrbGetCdb(Srb)->AsByte[0], Srb->PathId, Srb->TargetId, Srb->Lun);
         Srb->SrbStatus = SRB_STATUS_INVALID_REQUEST;
         break;
     };
