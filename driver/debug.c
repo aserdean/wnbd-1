@@ -31,6 +31,24 @@ WnbdLog(UINT32 Level,
         PCHAR Format,
         ...)
 {
+#ifndef DBG
+    if (!GlobalLogLevel) {
+        return;
+    }
+    va_list Args;
+    CHAR Buf[WNBD_LOG_BUFFER_SIZE];
+
+    if (Level > WnbdLogLevel) {
+        return;
+    }
+
+    Buf[0] = 0;
+    va_start(Args, Format);
+    RtlStringCbVPrintfA(Buf, sizeof(Buf), Format, Args);
+    va_end(Args);
+
+    DbgPrintEx(DPFLTR_SCSIMINIPORT_ID, GlobalLogLevel - 1, "%s:%lu %s\n", FuncName, Line, Buf);
+#else
     va_list Args;
     CHAR Buf[WNBD_LOG_BUFFER_SIZE];
 
@@ -48,4 +66,5 @@ WnbdLog(UINT32 Level,
     } else {
         DbgPrintEx(DPFLTR_SCSIMINIPORT_ID, GlobalLogLevel - 1, "%s:%lu %s\n", FuncName, Line, Buf);
     }
+#endif
 }
