@@ -81,14 +81,16 @@ NbdReadStat(_In_ INT Fd,
             _In_ UINT64 Offset,
             _In_ ULONG Length,
             _Out_ PNTSTATUS IoStatus,
-            _Inout_ PVOID SystemBuffer);
+            _Inout_ PVOID SystemBuffer,
+            _Inout_ PVOID Preallocated);
 
 VOID
 NbdWriteStat(_In_ INT Fd,
              _In_ UINT64 Offset,
              _In_ ULONG Length,
              _Out_ PNTSTATUS IoStatus,
-             _In_ PVOID SystemBuffer);
+             _In_ PVOID SystemBuffer,
+             _Inout_ PVOID Preallocated);
 
 INT
 NbdOpenAndConnect(_In_ PCHAR HostName,

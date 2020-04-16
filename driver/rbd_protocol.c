@@ -381,7 +381,8 @@ NbdReadStat(INT Fd,
             UINT64 Offset,
             ULONG Length,
             PNTSTATUS IoStatus,
-            PVOID SystemBuffer)
+            PVOID SystemBuffer,
+            PVOID Preallocated)
 {
     WNBD_LOG_LOUD(": Enter");
     NTSTATUS Status = STATUS_SUCCESS;
@@ -395,8 +396,8 @@ NbdReadStat(INT Fd,
     PAGED_CODE();
 
     UINT64 i = 0;
-    Buf = Malloc(Length);
-    if (NULL == Buf || -1 == Fd) {
+    Buf = Preallocated; //Malloc(Length);
+    if (NULL == Buf || -1 == Fd || ((UINT)MEM_SIZE_16MB) < Length) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto Exit;
     }
@@ -439,9 +440,9 @@ NbdReadStat(INT Fd,
     RtlCopyMemory(SystemBuffer, Buf, Length);
 
 Exit:
-    if (NULL != Buf) {
+    /*if (NULL != Buf) {
         Free(Buf);
-    }
+    }*/
     *IoStatus = Status;
     WNBD_LOG_LOUD(": Exit");
 }
@@ -452,7 +453,8 @@ NbdWriteStat(INT Fd,
              UINT64 Offset,
              ULONG Length,
              PNTSTATUS IoStatus,
-             PVOID SystemBuffer)
+             PVOID SystemBuffer,
+             PVOID Preallocated)
 {
     WNBD_LOG_LOUD(": Enter");
 
@@ -474,9 +476,9 @@ NbdWriteStat(INT Fd,
     Request.Length = RtlUlongByteSwap(Length);
     RtlCopyMemory(&(Request.Handle), &i, sizeof(i));
     Request.From = RtlUlonglongByteSwap(Offset);
-    Buf = Malloc(Length + sizeof(NBD_REQUEST));
+    Buf = Preallocated; //Malloc(Length + sizeof(NBD_REQUEST));
 
-    if (NULL == Buf) {
+    if (NULL == Buf || ((UINT)MEM_SIZE_16MB) < (Length + sizeof(NBD_REQUEST))) {
         WNBD_LOG_ERROR("Insufficient resources");
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto Exit;
@@ -515,9 +517,9 @@ NbdWriteStat(INT Fd,
     }
 
 Exit:
-    if (NULL != Buf) {
+    /*if (NULL != Buf) {
         Free(Buf);
-    }
+    }*/
     *IoStatus = Status;
     WNBD_LOG_LOUD(": Exit");
 }
