@@ -47,6 +47,11 @@ WnbdDeleteScsiInformation(_In_ PVOID ScsiInformation)
         ScsiInfo->UserEntry = NULL;
     }
 
+    if (ScsiInfo->PreallocatedBuffer) {
+        ExFreePool(ScsiInfo->PreallocatedBuffer);
+        ScsiInfo->PreallocatedBuffer = NULL;
+    }
+
     if (-1 != ScsiInfo->Socket) {
         WNBD_LOG_INFO("Closing socket FD: %d", ScsiInfo->Socket);
         Close(ScsiInfo->Socket);
@@ -195,7 +200,8 @@ WnbdProcessDeviceThreadRequestsReads(_In_ PSCSI_DEVICE_INFORMATION DeviceInforma
                     Element->StartingLbn,
                     Element->ReadLength,
                     &Status,
-                    Buffer);
+                    Buffer,
+                    DeviceInformation->PreallocatedBuffer);
     }
     Element->Srb->DataTransferLength = Element->ReadLength;
 
@@ -222,7 +228,8 @@ WnbdProcessDeviceThreadRequestsWrites(_In_ PSCSI_DEVICE_INFORMATION DeviceInform
                      Element->StartingLbn,
                      Element->ReadLength,
                      &Status,
-                     Buffer);
+                     Buffer,
+                     DeviceInformation->PreallocatedBuffer);
     }
     Element->Srb->DataTransferLength = Element->ReadLength;
 
