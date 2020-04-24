@@ -1,0 +1,7 @@
+* text=auto
+*.ps1            text working-tree-encoding=UTF-16LE eol=crlf
+*.rc             text working-tree-encoding=UTF-16LE eol=crlf
+*.sln            text working-tree-enconding=UTF-16LE-BOM eol=crlf
+*.vcproj         text working-tree-enconding=UTF-16LE-BOM eol=crlf
+*.vcxproj        text working-tree-enconding=UTF-16LE-BOM eol=crlf
+*.vcxproj.*      text working-tree-enconding=UTF-16LE-BOM eol=crlf
