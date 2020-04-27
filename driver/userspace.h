@@ -66,6 +66,10 @@ NTSTATUS
 WnbdEnumerateActiveConnections(_In_ PGLOBAL_INFORMATION GInfo,
                                _In_ PIRP Irp);
 
+NTSTATUS
+WnbdDeleteConnection(_In_ PGLOBAL_INFORMATION GInfo,
+                     _In_ PUSER_IN Info);
+
 VOID
 WnbdInitScsiIds();
 

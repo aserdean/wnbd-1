@@ -388,9 +388,10 @@ WnbdSetDeviceMissing(_In_ PVOID Handle,
     return TRUE;
 }
 
+_Use_decl_annotations_
 NTSTATUS
-WnbdDeleteConnection(_In_ PGLOBAL_INFORMATION GInfo,
-                     _In_ PUSER_IN Info)
+WnbdDeleteConnection(PGLOBAL_INFORMATION GInfo,
+                     PUSER_IN Info)
 {
     WNBD_LOG_LOUD(": Enter");
     ASSERT(GInfo);
