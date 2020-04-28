@@ -437,7 +437,9 @@ NbdReadStat(INT Fd,
         Status = error;
         goto Exit;
     }
-    RtlCopyMemory(SystemBuffer, Buf, Length);
+    if (Buf != SystemBuffer) {
+        RtlCopyMemory(SystemBuffer, Buf, Length);
+    }
 
 Exit:
     /*if (NULL != Buf) {
@@ -489,12 +491,18 @@ NbdWriteStat(INT Fd,
         Status = STATUS_INVALID_SESSION;
         goto Exit;
     }
-#pragma warning(disable:6386)
-    RtlCopyMemory(Buf, &Request, sizeof(NBD_REQUEST));
-#pragma warning(default:6386)
-    RtlCopyMemory((Buf + sizeof(NBD_REQUEST)), SystemBuffer, Length);
 
-    if (-1 == RbdWriteExact(Fd, Buf, sizeof(NBD_REQUEST) + Length, &error)) {
+if (Buf != SystemBuffer) {
+    RtlCopyMemory(Buf, SystemBuffer, Length);
+}
+
+    if (-1 == RbdWriteExact(Fd, &Request, sizeof(NBD_REQUEST), &error)) {
+        WNBD_LOG_ERROR("Could not send request for NBD_CMD_WRITE");
+        Status = error;
+        goto Exit;
+    }
+
+    if (-1 == RbdWriteExact(Fd, Buf, Length, &error)) {
         WNBD_LOG_ERROR("Could not send request for NBD_CMD_WRITE");
         Status = error;
         goto Exit;

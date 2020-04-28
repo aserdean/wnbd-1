@@ -192,19 +192,38 @@ WnbdProcessDeviceThreadRequestsReads(_In_ PSCSI_DEVICE_INFORMATION DeviceInforma
     ASSERT(DeviceInformation);
     ASSERT(Element);
     ULONG StorResult;
-    PVOID Buffer;
+    PVOID Buffer, Buffer1;
     NTSTATUS Status = STATUS_SUCCESS;
+
+    StorResult = StorPortGetOriginalMdl(Element->DeviceExtension, Element->Srb, &Buffer1);
+    if (STOR_STATUS_SUCCESS != StorResult) {
+        ASSERT(0);
+    }
+    PMDL mdl = (PMDL)Buffer1;
+    if (mdl && (mdl->MdlFlags & MDL_PAGES_LOCKED))
+    {
+        Status = STATUS_ACCESS_DENIED;
+    }
 
     StorResult = StorPortGetSystemAddress(Element->DeviceExtension, Element->Srb, &Buffer);
     if (STOR_STATUS_SUCCESS != StorResult) {
         Status = SRB_STATUS_INTERNAL_ERROR;
     } else {
+        if (Status == STATUS_ACCESS_DENIED) {
         NbdReadStat(DeviceInformation->Socket,
-                    Element->StartingLbn,
-                    Element->ReadLength,
-                    &Status,
-                    Buffer,
-                    DeviceInformation->PreallocatedBuffer);
+                     Element->StartingLbn,
+                     Element->ReadLength,
+                     &Status,
+                     Buffer,
+                     DeviceInformation->PreallocatedBuffer);
+        } else {
+        NbdReadStat(DeviceInformation->Socket,
+                     Element->StartingLbn,
+                     Element->ReadLength,
+                     &Status,
+                     Buffer,
+                     Buffer);
+        }
     }
     Element->Srb->DataTransferLength = Element->ReadLength;
 
@@ -220,19 +239,38 @@ WnbdProcessDeviceThreadRequestsWrites(_In_ PSCSI_DEVICE_INFORMATION DeviceInform
     ASSERT(DeviceInformation);
     ASSERT(Element);
     ULONG StorResult;
-    PVOID Buffer;
+    PVOID Buffer, Buffer1;
     NTSTATUS Status = STATUS_SUCCESS;
+
+    StorResult = StorPortGetOriginalMdl(Element->DeviceExtension, Element->Srb, &Buffer1);
+    if (STOR_STATUS_SUCCESS != StorResult) {
+        ASSERT(0);
+    }
+    PMDL mdl = (PMDL) Buffer1;
+    if (mdl && (mdl->MdlFlags & MDL_PAGES_LOCKED))
+    {
+        Status = STATUS_ACCESS_DENIED;
+    }
 
     StorResult = StorPortGetSystemAddress(Element->DeviceExtension, Element->Srb, &Buffer);
     if (STOR_STATUS_SUCCESS != StorResult) {
         Status = SRB_STATUS_INTERNAL_ERROR;
     } else {
+        if (Status == STATUS_ACCESS_DENIED) {
         NbdWriteStat(DeviceInformation->Socket,
                      Element->StartingLbn,
                      Element->ReadLength,
                      &Status,
                      Buffer,
                      DeviceInformation->PreallocatedBuffer);
+        } else {
+        NbdWriteStat(DeviceInformation->Socket,
+                     Element->StartingLbn,
+                     Element->ReadLength,
+                     &Status,
+                     Buffer,
+                     Buffer);
+        }
     }
     Element->Srb->DataTransferLength = Element->ReadLength;
 
