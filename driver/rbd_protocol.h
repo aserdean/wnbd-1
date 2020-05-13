@@ -92,6 +92,10 @@ NbdWriteStat(_In_ INT Fd,
              _In_ PVOID SystemBuffer,
              _Inout_ PVOID Preallocated);
 
+VOID
+NbdFlushStat(_In_ INT Fd,
+             _Out_ PNTSTATUS IoStatus);
+
 INT
 NbdOpenAndConnect(_In_ PCHAR HostName,
                   _In_ PCHAR PortName);

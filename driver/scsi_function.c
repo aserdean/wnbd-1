@@ -156,7 +156,6 @@ WnbdExecuteScsiFunction(PVOID DeviceExtension,
     PWNBD_LU_EXTENSION LuExtension;
     NTSTATUS Status = STATUS_SUCCESS;
     KIRQL Irql;
-    KeAcquireSpinLock(&((PWNBD_EXTENSION)DeviceExtension)->DeviceListLock, &Irql);
 
     *Complete = TRUE;
 
@@ -173,7 +172,9 @@ WnbdExecuteScsiFunction(PVOID DeviceExtension,
         goto Exit;
     }
 
+    KeAcquireSpinLock(&((PWNBD_EXTENSION)DeviceExtension)->DeviceListLock, &Irql);
     Device = WnbdFindDevice(LuExtension, DeviceExtension, Srb);
+    KeReleaseSpinLock(&((PWNBD_EXTENSION)DeviceExtension)->DeviceListLock, Irql);
     if (NULL == Device) {
         WNBD_LOG_INFO("Could not find device PathId: %d TargetId: %d LUN: %d",
                       Srb->PathId, Srb->TargetId, Srb->Lun);
@@ -203,7 +204,6 @@ WnbdExecuteScsiFunction(PVOID DeviceExtension,
     }
 
 Exit:
-    KeReleaseSpinLock(&((PWNBD_EXTENSION)DeviceExtension)->DeviceListLock, Irql);
     WNBD_LOG_LOUD(": Exit");
 
     return SrbStatus;

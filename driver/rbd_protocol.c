@@ -531,3 +531,57 @@ Exit:
     *IoStatus = Status;
     WNBD_LOG_LOUD(": Exit");
 }
+
+_Use_decl_annotations_
+VOID
+NbdFlushStat(INT Fd,
+             PNTSTATUS IoStatus)
+{
+    WNBD_LOG_LOUD(": Enter");
+
+    NTSTATUS Status = STATUS_SUCCESS;
+    PAGED_CODE();
+    
+    UINT64 i = 0;
+    NBD_REQUEST Request;
+    NBD_REPLY Reply;
+    NTSTATUS error;
+
+    Request.Magic = RtlUlongByteSwap(NBD_REQUEST_MAGIC);
+    Request.Type = RtlUlongByteSwap(NBD_CMD_FLUSH);
+    Request.Length = 0;
+    RtlCopyMemory(&(Request.Handle), &i, sizeof(i));
+    Request.From = 0;
+
+    if (-1 == Fd) {
+        WNBD_LOG_ERROR("Invalid socket");
+        Status = STATUS_INVALID_SESSION;
+        goto Exit;
+    }
+
+    if (-1 == RbdWriteExact(Fd, &Request, sizeof(NBD_REQUEST), &error)) {
+        WNBD_LOG_ERROR("Could not send request for NBD_CMD_WRITE");
+        Status = error;
+        goto Exit;
+    }
+
+    if (-1 == RbdReadExact(Fd, &Reply, sizeof(NBD_REPLY), &error)) {
+        WNBD_LOG_ERROR("Could not read request for NBD_CMD_WRITE");
+        Status = error;
+        goto Exit;
+    }
+    if (NBD_REPLY_MAGIC != RtlUlongByteSwap(Reply.Magic)) {
+        WNBD_LOG_ERROR("Invalid NBD_REPLY_MAGIC for NBD_CMD_WRITE");
+        Status = STATUS_ABANDONED;
+        goto Exit;
+    }
+    if (0 != Reply.Error) {
+        WNBD_LOG_ERROR("Received reply error from NBD_CMD_WRITE: %llu", RtlUlongByteSwap(Reply.Error));
+        Status = STATUS_ABANDONED;
+        goto Exit;
+    }
+
+Exit:
+    *IoStatus = Status;
+    WNBD_LOG_LOUD(": Exit");
+}

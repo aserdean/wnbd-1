@@ -278,6 +278,20 @@ WnbdProcessDeviceThreadRequestsWrites(_In_ PSCSI_DEVICE_INFORMATION DeviceInform
     return Status;
 }
 
+NTSTATUS
+WnbdProcessDeviceThreadRequestsFlushes(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
+{
+    WNBD_LOG_LOUD(": Enter");
+    ASSERT(DeviceInformation);
+    NTSTATUS Status = STATUS_SUCCESS;
+
+    NbdFlushStat(DeviceInformation->Socket,
+                 &Status);
+
+    WNBD_LOG_LOUD(": Exit");
+    return Status;
+}
+
 VOID
 WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
 {
@@ -313,7 +327,7 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
             /*
              * We just want to mark synchronize as been successful
              */
-            Status = STATUS_SUCCESS;
+            Status = WnbdProcessDeviceThreadRequestsFlushes(DeviceInformation);
             break;
 
         default:
@@ -366,7 +380,7 @@ WnbdDeviceThread(_In_ PVOID Context)
 
     DeviceInformation = (PSCSI_DEVICE_INFORMATION) Context;
 
-    KeSetPriorityThread(KeGetCurrentThread(), LOW_REALTIME_PRIORITY);
+    KeSetPriorityThread(KeGetCurrentThread(), HIGH_PRIORITY);
 
     while (TRUE) {
         KeWaitForSingleObject(&DeviceInformation->DeviceEvent, Executive, KernelMode, FALSE, NULL);
