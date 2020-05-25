@@ -150,37 +150,61 @@ WnbdInitializeScsiInfo(_In_ PSCSI_DEVICE_INFORMATION ScsiInfo)
 {
     WNBD_LOG_LOUD(": Enter");
     ASSERT(ScsiInfo);
-    HANDLE thread_handle;
+    HANDLE request_thread_handle = NULL, reply_thread_handle = NULL;
     NTSTATUS Status = STATUS_SUCCESS;
 
-    InitializeListHead(&ScsiInfo->ListHead);
-    KeInitializeSpinLock(&ScsiInfo->ListLock);
+    InitializeListHead(&ScsiInfo->RequestListHead);
+    KeInitializeSpinLock(&ScsiInfo->RequestListLock);
+    InitializeListHead(&ScsiInfo->ReplyListHead);
+    KeInitializeSpinLock(&ScsiInfo->ReplyListLock);
     KeInitializeEvent(&ScsiInfo->DeviceEvent, SynchronizationEvent, FALSE);
 
     ScsiInfo->HardTerminateDevice = FALSE;
     ScsiInfo->SoftTerminateDevice = FALSE;
 
-    Status = PsCreateSystemThread(&thread_handle, (ACCESS_MASK)0L, NULL, NULL, NULL, WnbdDeviceThread, ScsiInfo);
-
+    Status = PsCreateSystemThread(&request_thread_handle, (ACCESS_MASK)0L, NULL,
+                                  NULL, NULL, WnbdDeviceRequestThread, ScsiInfo);
     if (!NT_SUCCESS(Status)) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto Exit;
     }
 
-    Status = ObReferenceObjectByHandle(thread_handle, THREAD_ALL_ACCESS, NULL, KernelMode,
-        &ScsiInfo->DeviceThread, NULL);
+    Status = ObReferenceObjectByHandle(request_thread_handle, THREAD_ALL_ACCESS, NULL, KernelMode,
+        &ScsiInfo->DeviceReplyThread, NULL);
 
     if (!NT_SUCCESS(Status)) {
-        ZwClose(thread_handle);
-        ScsiInfo->SoftTerminateDevice = TRUE;
-        KeSetEvent(&ScsiInfo->DeviceEvent, (KPRIORITY)0, FALSE);
         Status = STATUS_INSUFFICIENT_RESOURCES;
-        goto Exit;
+        goto SoftTerminate;
+    }
+
+    Status = PsCreateSystemThread(&reply_thread_handle, (ACCESS_MASK)0L, NULL,
+                                  NULL, NULL, WnbdDeviceReplyThread, ScsiInfo);
+    if (!NT_SUCCESS(Status)) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto SoftTerminate;
+    }
+
+    Status = ObReferenceObjectByHandle(reply_thread_handle, THREAD_ALL_ACCESS, NULL, KernelMode,
+        &ScsiInfo->DeviceReplyThread, NULL);
+
+    if (!NT_SUCCESS(Status)) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto SoftTerminate;
     }
 
 Exit:
     WNBD_LOG_LOUD(": Exit");
     return Status;
+
+SoftTerminate:
+    if(request_thread_handle)
+        ZwClose(request_thread_handle);
+    if(reply_thread_handle)
+        ZwClose(reply_thread_handle);
+    ScsiInfo->SoftTerminateDevice = TRUE;
+    KeSetEvent(&ScsiInfo->DeviceEvent, (KPRIORITY)0, FALSE);
+    Status = STATUS_INSUFFICIENT_RESOURCES;
+    goto Exit;
 }
 
 VOID
@@ -416,13 +440,15 @@ WnbdDeleteConnection(PGLOBAL_INFORMATION GInfo,
         KeSetEvent(&ScsiInfo->DeviceEvent, (KPRIORITY)0, FALSE);
         LARGE_INTEGER Timeout;
         Timeout.QuadPart = (-1 * 1000 * 10000);
-        KeWaitForSingleObject(ScsiInfo->DeviceThread, Executive, KernelMode, FALSE, &Timeout);
+        KeWaitForSingleObject(ScsiInfo->DeviceRequestThread, Executive, KernelMode, FALSE, &Timeout);
+        KeWaitForSingleObject(ScsiInfo->DeviceReplyThread, Executive, KernelMode, FALSE, &Timeout);
         if (-1 != ScsiInfo->Socket) {
             WNBD_LOG_INFO("Closing socket FD: %d", ScsiInfo->Socket);
             Close(ScsiInfo->Socket);
             ScsiInfo->Socket = -1;
         }
-        ObDereferenceObject(ScsiInfo->DeviceThread);
+        ObDereferenceObject(ScsiInfo->DeviceRequestThread);
+        ObDereferenceObject(ScsiInfo->DeviceReplyThread);
 
         if(!WnbdSetDeviceMissing(ScsiInfo->Device,TRUE)) {
             WNBD_LOG_WARN("Could not delete media because it is still in use.");

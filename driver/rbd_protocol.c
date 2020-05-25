@@ -10,13 +10,6 @@
 #include "debug.h"
 #include "rbd_protocol.h"
 
-
-#define RBD_PROTOCOL_TAG      'pDBR'
-#define BUF_SIZE              1024
-#define INIT_PASSWD           "NBDMAGIC"
-#define Malloc(S) ExAllocatePoolWithTag(NonPagedPoolNx, S, RBD_PROTOCOL_TAG)
-#define Free(S) ExFreePool(S)
-
 const UINT64 CLIENT_MAGIC = 0x00420281861253LL;
 const UINT64 OPTION_MAGIC = 0x49484156454F5054LL;
 const UINT64 REPLY_MAGIC  = 0x3e889045565a9LL;
@@ -28,6 +21,12 @@ RbdReadExact(_In_ INT Fd,
              _Inout_ PNTSTATUS error)
 {
     WNBD_LOG_LOUD(": Enter");
+
+    if(!Data) {
+        *error = STATUS_INSUFFICIENT_RESOURCES;
+        return -1;
+    }
+
     INT Result = 0;
     PUCHAR Temp = Data;
     while (0 < Length) {
@@ -117,7 +116,7 @@ PREPLY_HEADER
 RbdReadReply(_In_ INT Fd)
 {
     WNBD_LOG_LOUD(": Enter");
-    PREPLY_HEADER Retval = Malloc(sizeof(REPLY_HEADER));
+    PREPLY_HEADER Retval = NbdMalloc(sizeof(REPLY_HEADER));
 
     if (!Retval) {
         WNBD_LOG_ERROR("Insufficient resources to allocate memory");
@@ -135,19 +134,19 @@ RbdReadReply(_In_ INT Fd)
 
     if (REPLY_MAGIC != Retval->Magic) {
         WNBD_LOG_ERROR("Received invalid negotiation magic %llu (expected %llu)", Retval->Magic, REPLY_MAGIC);
-        Free(Retval);
+        NbdFree(Retval);
         return NULL;
     }
     if (Retval->Datasize > 0) {
         INT NewSize = sizeof(REPLY_HEADER) + Retval->Datasize;
-        PREPLY_HEADER RetvalTemp = Malloc(NewSize);
+        PREPLY_HEADER RetvalTemp = NbdMalloc(NewSize);
         if (!RetvalTemp) {
             WNBD_LOG_ERROR("Insufficient resources to allocate memory");
             return NULL;
         }
         RtlCopyMemory(RetvalTemp, Retval, sizeof(REPLY_HEADER));
         if (Retval) {
-            Free(Retval);
+            NbdFree(Retval);
         }
         Retval = NULL;
         RbdReadExact(Fd, &(RetvalTemp->Data), RetvalTemp->Datasize, &error);
@@ -252,7 +251,7 @@ RbdNegotiate(_In_ INT* Pfd,
 
     do {
         if (NULL != Reply) {
-            Free(Reply);
+            NbdFree(Reply);
         }
         Reply = RbdReadReply(Fd);
         if (!Reply) {
@@ -263,7 +262,7 @@ RbdNegotiate(_In_ INT* Pfd,
             case NBD_REP_ERR_UNSUP:
                 WNBD_LOG_ERROR("NBD_REP_ERR_UNSUP");
                 RbdSendOptExportName(Fd, Size, Flags, Go, Name, GFlags);
-                Free(Reply);
+                NbdFree(Reply);
                 return STATUS_SUCCESS;
 
             case NBD_REP_ERR_POLICY:
@@ -272,7 +271,7 @@ RbdNegotiate(_In_ INT* Pfd,
                 } else {
                     WNBD_LOG_ERROR("Connection not allowed by server policy.");
                 }
-                Free(Reply);
+                NbdFree(Reply);
                 return STATUS_FAIL_CHECK;
 
             default:
@@ -282,7 +281,7 @@ RbdNegotiate(_In_ INT* Pfd,
                 else {
                     WNBD_LOG_ERROR("Unknown error returned by server.");
                 }
-                Free(Reply);
+                NbdFree(Reply);
                 return STATUS_FAIL_CHECK;
             }
         }
@@ -310,7 +309,7 @@ RbdNegotiate(_In_ INT* Pfd,
     } while (Reply->ReplyType != NBD_REP_ACK);
 
     if (NULL != Reply) {
-        Free(Reply);
+        NbdFree(Reply);
     }
 
     WNBD_LOG_LOUD(": Exit");
@@ -381,67 +380,33 @@ NbdReadStat(INT Fd,
             UINT64 Offset,
             ULONG Length,
             PNTSTATUS IoStatus,
-            PVOID SystemBuffer)
+            UINT64 Handle)
 {
     WNBD_LOG_LOUD(": Enter");
     NTSTATUS Status = STATUS_SUCCESS;
-    PCHAR Buf = NULL;
-    if (NULL == SystemBuffer) {
+
+    if (-1 == Fd) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto Exit;
     }
-    ASSERT(NULL != SystemBuffer);
 
     PAGED_CODE();
 
-    UINT64 i = 0;
-    Buf = Malloc(Length);
-    if (NULL == Buf || -1 == Fd) {
-        Status = STATUS_INSUFFICIENT_RESOURCES;
-        goto Exit;
-    }
-
     NBD_REQUEST Request;
-    NBD_REPLY Reply = { 0 };
     NTSTATUS error;
 
     Request.Magic = RtlUlongByteSwap(NBD_REQUEST_MAGIC);
     Request.Type = RtlUlongByteSwap(NBD_CMD_READ);
     Request.Length = RtlUlongByteSwap(Length);
-    RtlCopyMemory(&(Request.Handle), &i, sizeof(i));
     Request.From = RtlUlonglongByteSwap(Offset);
+    Request.Handle = Handle;
 
     if (-1 == RbdWriteExact(Fd, &Request, sizeof(NBD_REQUEST), &error)) {
         WNBD_LOG_INFO("Could not send request for NBD_CMD_READ");
         Status = error;
         goto Exit;
     }
-    if (-1 == RbdReadExact(Fd, &Reply, sizeof(NBD_REPLY), &error)) {
-        WNBD_LOG_INFO("Could not read request for NBD_CMD_READ");
-        Status = error;
-        goto Exit;
-    }
-    if(NBD_REPLY_MAGIC != RtlUlongByteSwap(Reply.Magic)) {
-        WNBD_LOG_INFO("Invalid NBD_REPLY_MAGIC for NBD_CMD_READ");
-        Status = STATUS_ABANDONED;
-        goto Exit;
-    }
-    if (0 != Reply.Error) {
-        WNBD_LOG_INFO("Received reply error from NBD_CMD_READ: %llu", Reply.Error);
-        Status = STATUS_ABANDONED;
-        goto Exit;
-    }
-    if (-1 == RbdReadExact(Fd, Buf, Length, &error)) {
-        WNBD_LOG_INFO("Could not read request for NBD_CMD_READ");
-        Status = error;
-        goto Exit;
-    }
-    RtlCopyMemory(SystemBuffer, Buf, Length);
-
 Exit:
-    if (NULL != Buf) {
-        Free(Buf);
-    }
     *IoStatus = Status;
     WNBD_LOG_LOUD(": Exit");
 }
@@ -452,7 +417,8 @@ NbdWriteStat(INT Fd,
              UINT64 Offset,
              ULONG Length,
              PNTSTATUS IoStatus,
-             PVOID SystemBuffer)
+             PVOID SystemBuffer,
+             UINT64 Handle)
 {
     WNBD_LOG_LOUD(": Enter");
 
@@ -463,18 +429,16 @@ NbdWriteStat(INT Fd,
         goto Exit;
     }
     PAGED_CODE();
-    
-    UINT64 i = 0;
+
     NBD_REQUEST Request;
-    NBD_REPLY Reply;
     NTSTATUS error;
 
     Request.Magic = RtlUlongByteSwap(NBD_REQUEST_MAGIC);
     Request.Type = RtlUlongByteSwap(NBD_CMD_WRITE);
     Request.Length = RtlUlongByteSwap(Length);
-    RtlCopyMemory(&(Request.Handle), &i, sizeof(i));
     Request.From = RtlUlonglongByteSwap(Offset);
-    Buf = Malloc(Length + sizeof(NBD_REQUEST));
+    Request.Handle = Handle;
+    Buf = NbdMalloc(Length + sizeof(NBD_REQUEST));
 
     if (NULL == Buf) {
         WNBD_LOG_ERROR("Insufficient resources");
@@ -498,26 +462,36 @@ NbdWriteStat(INT Fd,
         goto Exit;
     }
 
-    if (-1 == RbdReadExact(Fd, &Reply, sizeof(NBD_REPLY), &error)) {
-        WNBD_LOG_ERROR("Could not read request for NBD_CMD_WRITE");
-        Status = error;
-        goto Exit;
-    }
-    if (NBD_REPLY_MAGIC != RtlUlongByteSwap(Reply.Magic)) {
-        WNBD_LOG_ERROR("Invalid NBD_REPLY_MAGIC for NBD_CMD_WRITE");
-        Status = STATUS_ABANDONED;
-        goto Exit;
-    }
-    if (0 != Reply.Error) {
-        WNBD_LOG_ERROR("Received reply error from NBD_CMD_WRITE: %llu", RtlUlongByteSwap(Reply.Error));
-        Status = STATUS_ABANDONED;
-        goto Exit;
-    }
-
 Exit:
     if (NULL != Buf) {
-        Free(Buf);
+        NbdFree(Buf);
     }
     *IoStatus = Status;
     WNBD_LOG_LOUD(": Exit");
+}
+
+_Use_decl_annotations_
+NTSTATUS
+NbdReadReply(INT Fd,
+             PNBD_REPLY Reply) {
+    WNBD_LOG_LOUD(": Enter");
+    PAGED_CODE();
+
+    NTSTATUS error;
+    if (-1 == RbdReadExact(Fd, Reply, sizeof(NBD_REPLY), &error)) {
+        WNBD_LOG_INFO("Could not read command reply.");
+        return error;
+    }
+
+    if (NBD_REPLY_MAGIC != RtlUlongByteSwap(Reply->Magic)) {
+        WNBD_LOG_INFO("Invalid NBD_REPLY_MAGIC.");
+        return STATUS_ABANDONED;
+    }
+    if (0 != Reply->Error) {
+        // TODO: do we care about the actual error?
+        WNBD_LOG_INFO("NBD reply contains error: %llu", Reply->Error);
+        return STATUS_ABANDONED;
+    }
+
+    return STATUS_SUCCESS;
 }

@@ -14,8 +14,29 @@
 #include "util.h"
 #include "userspace.h"
 
-UCHAR DrainDeviceQueue(PVOID DeviceExtension,
-                       PSCSI_REQUEST_BLOCK Srb)
+VOID DrainDeviceQueue(PWNBD_SCSI_DEVICE Device, PLIST_ENTRY ListHead, PKSPIN_LOCK ListLock)
+{
+    PLIST_ENTRY Request;
+    PSRB_QUEUE_ELEMENT Element;
+
+    while ((Request = ExInterlockedRemoveHeadList(ListHead, ListLock)) != NULL) {
+        Element = CONTAINING_RECORD(Request, SRB_QUEUE_ELEMENT, Link);
+
+        Element->Srb->DataTransferLength = 0;
+        Element->Srb->SrbStatus = SRB_STATUS_ABORTED;
+
+        InterlockedDecrement(&Device->OutstandingIoCount);
+        WNBD_LOG_INFO("Notifying StorPort of completion of %p status: 0x%x(%s)",
+            Element->Srb, Element->Srb->SrbStatus,
+            WnbdToStringSrbStatus(Element->Srb->SrbStatus));
+        StorPortNotification(RequestComplete, Element->DeviceExtension,
+                             Element->Srb);
+        ExFreePool(Element);
+    }
+}
+
+UCHAR DrainDeviceQueues(PVOID DeviceExtension,
+                        PSCSI_REQUEST_BLOCK Srb)
 
 {
     WNBD_LOG_ERROR(": Enter");
@@ -59,21 +80,9 @@ UCHAR DrainDeviceQueue(PVOID DeviceExtension,
         goto Exit;
     }
     PSCSI_DEVICE_INFORMATION Info = (PSCSI_DEVICE_INFORMATION)Device->ScsiDeviceExtension;
-    PLIST_ENTRY Request;
-    PSRB_QUEUE_ELEMENT Element;
 
-    while ((Request = ExInterlockedRemoveHeadList(&Info->ListHead, &Info->ListLock)) != NULL) {
-        Element = CONTAINING_RECORD(Request, SRB_QUEUE_ELEMENT, Link);
-
-        Element->Srb->DataTransferLength = 0;
-        Element->Srb->SrbStatus = SRB_STATUS_ABORTED;
-
-        InterlockedDecrement(&Device->OutstandingIoCount);
-        WNBD_LOG_INFO("Notifying StorPort of completion of %p status: 0x%x(%s)",
-            Element->Srb, Element->Srb->SrbStatus, WnbdToStringSrbStatus(Element->Srb->SrbStatus));
-        StorPortNotification(RequestComplete, Element->DeviceExtension, Element->Srb);
-        ExFreePool(Element);
-    }
+    DrainDeviceQueue(Device, &Info->RequestListHead, &Info->RequestListLock);
+    DrainDeviceQueue(Device, &Info->ReplyListHead, &Info->ReplyListLock);
 
     SrbStatus = SRB_STATUS_SUCCESS;
 
@@ -94,7 +103,7 @@ WnbdAbortFunction(_In_ PVOID DeviceExtension,
     ASSERT(Srb);
     ASSERT(DeviceExtension);
 
-    UCHAR SrbStatus = DrainDeviceQueue(DeviceExtension, Srb);
+    UCHAR SrbStatus = DrainDeviceQueues(DeviceExtension, Srb);
 
     WNBD_LOG_LOUD(": Exit");
 
@@ -111,7 +120,7 @@ WnbdResetLogicalUnitFunction(PVOID DeviceExtension,
     ASSERT(Srb);
     ASSERT(DeviceExtension);
 
-    UCHAR SrbStatus = DrainDeviceQueue(DeviceExtension, Srb);
+    UCHAR SrbStatus = DrainDeviceQueues(DeviceExtension, Srb);
 
     WNBD_LOG_LOUD(": Exit");
 

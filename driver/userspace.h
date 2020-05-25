@@ -26,7 +26,7 @@ typedef struct _USER_ENTRY {
 
 typedef struct _SCSI_DEVICE_INFORMATION
 {
-    PVOID                       Device;
+    PWNBD_SCSI_DEVICE           Device;
     PGLOBAL_INFORMATION         GlobalInformation;
 
     ULONG                       BusIndex;
@@ -37,11 +37,17 @@ typedef struct _SCSI_DEVICE_INFORMATION
     PUSER_ENTRY                 UserEntry;
     INT                         Socket;
 
-    LIST_ENTRY                  ListHead;
-    KSPIN_LOCK                  ListLock;
+    // TODO: rename as PendingReqListHead
+    LIST_ENTRY                  RequestListHead;
+    KSPIN_LOCK                  RequestListLock;
+
+    // TODO: rename as SubmittedReqListHead
+    LIST_ENTRY                  ReplyListHead;
+    KSPIN_LOCK                  ReplyListLock;
 
     KEVENT                      DeviceEvent;
-    PVOID                       DeviceThread;
+    PVOID                       DeviceRequestThread;
+    PVOID                       DeviceReplyThread;
     BOOLEAN                     HardTerminateDevice;
     BOOLEAN                     SoftTerminateDevice;
 } SCSI_DEVICE_INFORMATION, *PSCSI_DEVICE_INFORMATION;

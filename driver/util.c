@@ -10,6 +10,7 @@
 #include "rbd_protocol.h"
 #include "scsi_driver_extensions.h"
 #include "scsi_trace.h"
+#include "srb_helper.h"
 #include "userspace.h"
 #include "util.h"
 
@@ -25,7 +26,7 @@ WnbdDeleteScsiInformation(_In_ PVOID ScsiInformation)
     PLIST_ENTRY Request;
     PSRB_QUEUE_ELEMENT Element;
 
-    while ((Request = ExInterlockedRemoveHeadList(&ScsiInfo->ListHead, &ScsiInfo->ListLock)) != NULL) {
+    while ((Request = ExInterlockedRemoveHeadList(&ScsiInfo->RequestListHead, &ScsiInfo->RequestListLock)) != NULL) {
         Element = CONTAINING_RECORD(Request, SRB_QUEUE_ELEMENT, Link);
         Element->Srb->DataTransferLength = 0;
         Element->Srb->SrbStatus = SRB_STATUS_ABORTED;
@@ -186,21 +187,13 @@ WnbdProcessDeviceThreadRequestsReads(_In_ PSCSI_DEVICE_INFORMATION DeviceInforma
     WNBD_LOG_LOUD(": Enter");
     ASSERT(DeviceInformation);
     ASSERT(Element);
-    ULONG StorResult;
-    PVOID Buffer;
     NTSTATUS Status = STATUS_SUCCESS;
 
-    StorResult = StorPortGetSystemAddress(Element->DeviceExtension, Element->Srb, &Buffer);
-    if (STOR_STATUS_SUCCESS != StorResult) {
-        Status = SRB_STATUS_INTERNAL_ERROR;
-    } else {
-        NbdReadStat(DeviceInformation->Socket,
-                    Element->StartingLbn,
-                    Element->ReadLength,
-                    &Status,
-                    Buffer);
-    }
-    Element->Srb->DataTransferLength = Element->ReadLength;
+    NbdReadStat(DeviceInformation->Socket,
+                Element->StartingLbn,
+                Element->ReadLength,
+                &Status,
+                Element->Tag);
 
     WNBD_LOG_LOUD(": Exit");
     return Status;
@@ -225,12 +218,26 @@ WnbdProcessDeviceThreadRequestsWrites(_In_ PSCSI_DEVICE_INFORMATION DeviceInform
                      Element->StartingLbn,
                      Element->ReadLength,
                      &Status,
-                     Buffer);
+                     Buffer,
+                     Element->Tag);
     }
-    Element->Srb->DataTransferLength = Element->ReadLength;
 
     WNBD_LOG_LOUD(": Exit");
     return Status;
+}
+
+VOID CloseConnection(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation) {
+    KeEnterCriticalRegion();
+    ExAcquireResourceExclusiveLite(
+        &DeviceInformation->GlobalInformation->ConnectionMutex, TRUE);
+    if (-1 != DeviceInformation->Socket) {
+        WNBD_LOG_INFO("Closing socket FD: %d", DeviceInformation->Socket);
+        Close(DeviceInformation->Socket);
+        DeviceInformation->Socket = -1;
+        DeviceInformation->Device->Missing = TRUE;
+    }
+    ExReleaseResourceLite(&DeviceInformation->GlobalInformation->ConnectionMutex);
+    KeLeaveCriticalRegion();
 }
 
 VOID
@@ -242,12 +249,16 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
     PLIST_ENTRY Request;
     PSRB_QUEUE_ELEMENT Element;
     NTSTATUS Status = STATUS_SUCCESS;
+    static UINT64 RequestTag = 0;
 
-    while ((Request = ExInterlockedRemoveHeadList(&DeviceInformation->ListHead, &DeviceInformation->ListLock)) != NULL) {
+    while ((Request = ExInterlockedRemoveHeadList(
+            &DeviceInformation->RequestListHead,
+            &DeviceInformation->RequestListLock)) != NULL) {
+        RequestTag += 1;
         Element = CONTAINING_RECORD(Request, SRB_QUEUE_ELEMENT, Link);
+        Element->Tag = RequestTag;
         Element->Srb->DataTransferLength = 0;
         PCDB Cdb = (PCDB)&Element->Srb->Cdb;
-        PWNBD_SCSI_DEVICE Device = (PWNBD_SCSI_DEVICE)DeviceInformation->Device;
         switch (Cdb->AsByte[0]) {
         case SCSIOP_READ6:
         case SCSIOP_READ:
@@ -277,7 +288,9 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
         }
 
         if (STATUS_SUCCESS == Status) {
-            Element->Srb->SrbStatus = SRB_STATUS_SUCCESS;
+            ExInterlockedInsertTailList(
+                &DeviceInformation->ReplyListHead,
+                &Element->Link, &DeviceInformation->ReplyListLock);
         } else {
             Element->Srb->DataTransferLength = 0;
             Element->Srb->SrbStatus = SRB_STATUS_TIMEOUT;
@@ -285,32 +298,16 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
             if (STATUS_CONNECTION_RESET == Status ||
                 STATUS_CONNECTION_DISCONNECTED == Status ||
                 STATUS_CONNECTION_ABORTED == Status) {
-                Element->Srb->SrbStatus = SRB_STATUS_ERROR;
-                KeEnterCriticalRegion();
-                ExAcquireResourceExclusiveLite(&DeviceInformation->GlobalInformation->ConnectionMutex, TRUE);
-                if (-1 != DeviceInformation->Socket) {
-                    WNBD_LOG_INFO("Closing socket FD: %d", DeviceInformation->Socket);
-                    Close(DeviceInformation->Socket);
-                    DeviceInformation->Socket = -1;
-                    Device->Missing = TRUE;
-                }
-                ExReleaseResourceLite(&DeviceInformation->GlobalInformation->ConnectionMutex);
-                KeLeaveCriticalRegion();
+                CloseConnection(DeviceInformation);
             }
         }
-
-        InterlockedDecrement(&Device->OutstandingIoCount);
-        WNBD_LOG_INFO("Notifying StorPort of completion of %p status: 0x%x(%s)",
-            Element->Srb, Element->Srb->SrbStatus, WnbdToStringSrbStatus(Element->Srb->SrbStatus));
-        StorPortNotification(RequestComplete, Element->DeviceExtension, Element->Srb);
-        ExFreePool(Element);
     }
 
     WNBD_LOG_LOUD(": Exit");
 }
 
 VOID
-WnbdDeviceThread(_In_ PVOID Context)
+WnbdDeviceRequestThread(_In_ PVOID Context)
 {
     WNBD_LOG_LOUD(": Enter");
 
@@ -337,5 +334,130 @@ WnbdDeviceThread(_In_ PVOID Context)
             WNBD_LOG_INFO("Soft terminate thread: %p", DeviceInformation);
             PsTerminateSystemThread(STATUS_SUCCESS);
         }
+    }
+}
+
+VOID
+WnbdDeviceReplyThread(_In_ PVOID Context)
+{
+    WNBD_LOG_LOUD(": Enter");
+    ASSERT(Context);
+
+    PSCSI_DEVICE_INFORMATION DeviceInformation;
+    PAGED_CODE();
+
+    DeviceInformation = (PSCSI_DEVICE_INFORMATION) Context;
+
+    KeSetPriorityThread(KeGetCurrentThread(), LOW_REALTIME_PRIORITY);
+
+    while (TRUE) {
+        if (DeviceInformation->HardTerminateDevice) {
+            WNBD_LOG_INFO("Hard terminate thread: %p", DeviceInformation);
+            PsTerminateSystemThread(STATUS_SUCCESS);
+        }
+
+        WnbdProcessDeviceThreadReplies(DeviceInformation);
+
+        if (DeviceInformation->SoftTerminateDevice) {
+            WNBD_LOG_INFO("Soft terminate thread: %p", DeviceInformation);
+            PsTerminateSystemThread(STATUS_SUCCESS);
+        }
+    }
+}
+
+inline BOOLEAN
+IsReadSrb(PSCSI_REQUEST_BLOCK Srb)
+{
+    PCDB Cdb = SrbGetCdb(Srb);
+    if(!Cdb) {
+        return FALSE;
+    }
+    
+    switch (Cdb->AsByte[0]) {
+    case SCSIOP_READ6:
+    case SCSIOP_READ:
+    case SCSIOP_READ12:
+    case SCSIOP_READ16:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+VOID
+WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
+{
+    WNBD_LOG_LOUD(": Enter");
+    ASSERT(DeviceInformation);
+
+    PSRB_QUEUE_ELEMENT Element = NULL;
+    NTSTATUS Status = STATUS_SUCCESS;
+    NBD_REPLY Reply;
+    PVOID SrbBuff = NULL, TempBuff = NULL;
+    NTSTATUS error;
+
+    Status = NbdReadReply(DeviceInformation->Socket, &Reply);
+    if (Status) {
+        CloseConnection(DeviceInformation);
+        return;
+    }
+
+    // TODO: check how can we avoid the situation in which we're looping over
+    // list entries at the same time as the "Drain" function. Should we use
+    // KeEnterCriticalRegion or an additional spin lock or mutex?
+    PLIST_ENTRY ItemLink, ItemNext;
+    LIST_FORALL_SAFE(&DeviceInformation->ReplyListHead, ItemLink, ItemNext) {
+        Element = CONTAINING_RECORD(ItemLink, SRB_QUEUE_ELEMENT, Link);
+        if(Element->Tag == Reply.Handle) {
+            break;
+        }
+    }
+
+    if(!Element) {
+        WNBD_LOG_ERROR("Received reply with no matching request tag: 0x%x",
+            Reply.Handle);
+        CloseConnection(DeviceInformation);
+        goto Exit;
+    }
+
+    // TODO: can we use this buffer directly?
+    if (StorPortGetSystemAddress(Element->DeviceExtension, Element->Srb, &SrbBuff)) {
+        Element->Srb->SrbStatus = SRB_STATUS_INTERNAL_ERROR;
+        goto Exit;
+    }
+
+    if(IsReadSrb(Element->Srb)) {
+        TempBuff = NbdMalloc(Element->ReadLength);
+        if (!TempBuff) {
+            Status = STATUS_INSUFFICIENT_RESOURCES;
+            goto Exit;
+        }
+
+        if (-1 == RbdReadExact(DeviceInformation->Socket, TempBuff, Element->ReadLength, &error)) {
+            WNBD_LOG_ERROR("Failed receiving reply. Error: %d", error);
+            Element->Srb->DataTransferLength = 0;
+            Element->Srb->SrbStatus = SRB_STATUS_INTERNAL_ERROR;
+            CloseConnection(DeviceInformation);
+            goto Exit;
+        }
+        else {
+            RtlCopyMemory(SrbBuff, TempBuff, Element->ReadLength);
+        }
+    }
+    // TODO: rename ReadLength to DataLength
+    Element->Srb->DataTransferLength = Element->ReadLength;
+    Element->Srb->SrbStatus = SRB_STATUS_SUCCESS;
+
+Exit:
+    if(TempBuff) {
+        NbdFree(TempBuff);
+    }
+    InterlockedDecrement(&DeviceInformation->Device->OutstandingIoCount);
+    if (Element) {
+        WNBD_LOG_INFO("Notifying StorPort of completion of %p status: 0x%x(%s)",
+            Element->Srb, Element->Srb->SrbStatus,
+            WnbdToStringSrbStatus(Element->Srb->SrbStatus));
+        StorPortNotification(RequestComplete, Element->DeviceExtension, Element->Srb);
+        ExFreePool(Element);
     }
 }
