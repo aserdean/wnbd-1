@@ -39,7 +39,7 @@ UCHAR DrainDeviceQueues(PVOID DeviceExtension,
                         PSCSI_REQUEST_BLOCK Srb)
 
 {
-    WNBD_LOG_ERROR(": Enter");
+    WNBD_LOG_LOUD(": Enter");
     ASSERT(Srb);
     ASSERT(DeviceExtension);
 

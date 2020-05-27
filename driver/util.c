@@ -279,7 +279,10 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
             /*
              * We just want to mark synchronize as been successful
              */
+            Element->Srb->DataTransferLength = 0;
+            Element->Srb->SrbStatus = SRB_STATUS_SUCCESS;
             Status = STATUS_SUCCESS;
+            goto skip;
             break;
 
         default:
@@ -291,6 +294,7 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
             ExInterlockedInsertTailList(
                 &DeviceInformation->ReplyListHead,
                 &Element->Link, &DeviceInformation->ReplyListLock);
+            KeSetEvent(&DeviceInformation->DeviceEventReply, (KPRIORITY)0, FALSE);
         } else {
             Element->Srb->DataTransferLength = 0;
             Element->Srb->SrbStatus = SRB_STATUS_TIMEOUT;
@@ -300,6 +304,10 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
                 STATUS_CONNECTION_ABORTED == Status) {
                 CloseConnection(DeviceInformation);
             }
+// FIXME: ugly
+skip:
+            StorPortNotification(RequestComplete, Element->DeviceExtension, Element->Srb);
+            ExFreePool(Element);
         }
     }
 
@@ -351,6 +359,9 @@ WnbdDeviceReplyThread(_In_ PVOID Context)
     KeSetPriorityThread(KeGetCurrentThread(), LOW_REALTIME_PRIORITY);
 
     while (TRUE) {
+        /* We need this event to avoid lazy polling */
+        KeWaitForSingleObject(&DeviceInformation->DeviceEventReply, Executive, KernelMode, FALSE, NULL);
+
         if (DeviceInformation->HardTerminateDevice) {
             WNBD_LOG_INFO("Hard terminate thread: %p", DeviceInformation);
             PsTerminateSystemThread(STATUS_SUCCESS);
@@ -394,25 +405,33 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
     NTSTATUS Status = STATUS_SUCCESS;
     NBD_REPLY Reply;
     PVOID SrbBuff = NULL, TempBuff = NULL;
-    NTSTATUS error;
-
+    NTSTATUS error = STATUS_SUCCESS;
+    /* Check if the reply list is empty before trying anything else */
+    if (IsListEmpty(&DeviceInformation->ReplyListHead)) {
+        return;
+    }
     Status = NbdReadReply(DeviceInformation->Socket, &Reply);
     if (Status) {
         CloseConnection(DeviceInformation);
         return;
     }
-
     // TODO: check how can we avoid the situation in which we're looping over
     // list entries at the same time as the "Drain" function. Should we use
     // KeEnterCriticalRegion or an additional spin lock or mutex?
+    // Other elements can be inserted, we need a lock to perform the lookup
     PLIST_ENTRY ItemLink, ItemNext;
+    KIRQL Irql = { 0 };
+    KeAcquireSpinLock(&DeviceInformation->ReplyListLock, &Irql);
     LIST_FORALL_SAFE(&DeviceInformation->ReplyListHead, ItemLink, ItemNext) {
         Element = CONTAINING_RECORD(ItemLink, SRB_QUEUE_ELEMENT, Link);
         if(Element->Tag == Reply.Handle) {
+            /* Remove the element from the list once found*/
+            RemoveEntryList(&Element->Link);
             break;
         }
+        Element = NULL;
     }
-
+    KeReleaseSpinLock(&DeviceInformation->ReplyListLock, Irql);
     if(!Element) {
         WNBD_LOG_ERROR("Received reply with no matching request tag: 0x%x",
             Reply.Handle);
@@ -439,8 +458,7 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
             Element->Srb->SrbStatus = SRB_STATUS_INTERNAL_ERROR;
             CloseConnection(DeviceInformation);
             goto Exit;
-        }
-        else {
+        } else {
             RtlCopyMemory(SrbBuff, TempBuff, Element->ReadLength);
         }
     }

@@ -704,11 +704,14 @@ KsSendRecv(
     goto Error;
   }
 
-  //
-  // Reset the async context.
-  //
 
-  KspAsyncContextReset(&Socket->AsyncContext);
+  KSOCKET_ASYNC_CONTEXT AsyncContext;
+  Status = KspAsyncContextAllocate(&AsyncContext);
+
+  if (!NT_SUCCESS(Status))
+  {
+      goto Error;
+  }
 
   //
   // Send / receive the data.
@@ -720,7 +723,7 @@ KsSendRecv(
       Socket->WskSocket,        // Socket
       &WskBuffer,               // Buffer
       Flags,                    // Flags
-      Socket->AsyncContext.Irp  // Irp
+      AsyncContext.Irp  // Irp
       );
   }
   else
@@ -729,11 +732,11 @@ KsSendRecv(
       Socket->WskSocket,        // Socket
       &WskBuffer,               // Buffer
       Flags,                    // Flags
-      Socket->AsyncContext.Irp  // Irp
+      AsyncContext.Irp  // Irp
       );
   }
 
-  KspAsyncContextWaitForCompletion(&Socket->AsyncContext, &Status);
+  KspAsyncContextWaitForCompletion(&AsyncContext, &Status);
 
   //
   // Set the number of bytes sent / received.
@@ -741,7 +744,7 @@ KsSendRecv(
 
   if (NT_SUCCESS(Status))
   {
-    *Length = (ULONG)Socket->AsyncContext.Irp->IoStatus.Information;
+    *Length = (ULONG)AsyncContext.Irp->IoStatus.Information;
   }
 
   //
@@ -749,6 +752,7 @@ KsSendRecv(
   //
 
   MmUnlockPages(WskBuffer.Mdl);
+  KspAsyncContextFree(&AsyncContext);
 
 Error:
   if (WskBuffer.Mdl) {

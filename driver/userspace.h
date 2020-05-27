@@ -46,6 +46,7 @@ typedef struct _SCSI_DEVICE_INFORMATION
     KSPIN_LOCK                  ReplyListLock;
 
     KEVENT                      DeviceEvent;
+    KEVENT                      DeviceEventReply;
     PVOID                       DeviceRequestThread;
     PVOID                       DeviceReplyThread;
     BOOLEAN                     HardTerminateDevice;

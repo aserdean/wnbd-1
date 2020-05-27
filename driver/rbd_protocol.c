@@ -21,12 +21,10 @@ RbdReadExact(_In_ INT Fd,
              _Inout_ PNTSTATUS error)
 {
     WNBD_LOG_LOUD(": Enter");
-
-    if(!Data) {
-        *error = STATUS_INSUFFICIENT_RESOURCES;
+    if (-1 == Fd) {
+        *error = STATUS_CONNECTION_DISCONNECTED;
         return -1;
     }
-
     INT Result = 0;
     PUCHAR Temp = Data;
     while (0 < Length) {
@@ -52,6 +50,10 @@ RbdWriteExact(_In_ INT Fd,
               _Inout_ PNTSTATUS error)
 {
     WNBD_LOG_LOUD(": Enter");
+    if (-1 == Fd) {
+        *error = STATUS_CONNECTION_DISCONNECTED;
+        return -1;
+    }
     INT Result = 0;
     PUCHAR Temp = Data;
     while (Length > 0) {
@@ -493,5 +495,6 @@ NbdReadReply(INT Fd,
         return STATUS_ABANDONED;
     }
 
+    WNBD_LOG_LOUD(": Exit");
     return STATUS_SUCCESS;
 }

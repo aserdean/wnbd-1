@@ -158,6 +158,8 @@ WnbdInitializeScsiInfo(_In_ PSCSI_DEVICE_INFORMATION ScsiInfo)
     InitializeListHead(&ScsiInfo->ReplyListHead);
     KeInitializeSpinLock(&ScsiInfo->ReplyListLock);
     KeInitializeEvent(&ScsiInfo->DeviceEvent, SynchronizationEvent, FALSE);
+    /* The following is to avoid lazy polling, I'm not sure if we should do lazy polling */
+    KeInitializeEvent(&ScsiInfo->DeviceEventReply, SynchronizationEvent, FALSE);
 
     ScsiInfo->HardTerminateDevice = FALSE;
     ScsiInfo->SoftTerminateDevice = FALSE;
@@ -169,8 +171,9 @@ WnbdInitializeScsiInfo(_In_ PSCSI_DEVICE_INFORMATION ScsiInfo)
         goto Exit;
     }
 
+    /* BSOD if we use DeviceReplyThread*/
     Status = ObReferenceObjectByHandle(request_thread_handle, THREAD_ALL_ACCESS, NULL, KernelMode,
-        &ScsiInfo->DeviceReplyThread, NULL);
+        &ScsiInfo->DeviceRequestThread, NULL);
 
     if (!NT_SUCCESS(Status)) {
         Status = STATUS_INSUFFICIENT_RESOURCES;

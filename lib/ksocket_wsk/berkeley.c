@@ -288,6 +288,13 @@ KspUtilFreeAddrInfo(
     RtlFreeAnsiString(&CanonicalName);
   }
 
+  if (AddrInfo->ai_addr)
+  {
+    ExFreePoolWithTag(AddrInfo->ai_addr, MEMORY_TAG);
+  }
+
+
+
   //
   // Finally, free the structure itself.
   //
