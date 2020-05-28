@@ -73,7 +73,8 @@ WnbdDeleteDevices(_In_ PWNBD_EXTENSION Ext,
     PLIST_ENTRY Link, Next;
     KeEnterCriticalRegion();
     ExAcquireResourceSharedLite(&Ext->DeviceResourceLock, TRUE);
-
+    KeEnterCriticalRegion();
+    ExAcquireResourceExclusiveLite(&((PGLOBAL_INFORMATION)Ext->GlobalInformation)->ConnectionMutex, TRUE);
     LIST_FORALL_SAFE(&Ext->DeviceList, Link, Next) {
         Device = (PWNBD_SCSI_DEVICE)CONTAINING_RECORD(Link, WNBD_SCSI_DEVICE, ListEntry);
         if (Device->ReportedMissing || All) {
@@ -91,7 +92,8 @@ WnbdDeleteDevices(_In_ PWNBD_EXTENSION Ext,
             }
         }
     }
-
+    ExReleaseResourceLite(&((PGLOBAL_INFORMATION)Ext->GlobalInformation)->ConnectionMutex);
+    KeLeaveCriticalRegion();
     ExReleaseResourceLite(&Ext->DeviceResourceLock);
     KeLeaveCriticalRegion();
 
@@ -403,11 +405,11 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
 
     PSRB_QUEUE_ELEMENT Element = NULL;
     NTSTATUS Status = STATUS_SUCCESS;
-    NBD_REPLY Reply;
+    NBD_REPLY Reply = { 0 };
     PVOID SrbBuff = NULL, TempBuff = NULL;
     NTSTATUS error = STATUS_SUCCESS;
     /* Check if the reply list is empty before trying anything else */
-    if (IsListEmpty(&DeviceInformation->ReplyListHead)) {
+    if (-1 == DeviceInformation->Socket || IsListEmpty(&DeviceInformation->ReplyListHead)) {
         return;
     }
     Status = NbdReadReply(DeviceInformation->Socket, &Reply);
@@ -424,7 +426,7 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
     KeAcquireSpinLock(&DeviceInformation->ReplyListLock, &Irql);
     LIST_FORALL_SAFE(&DeviceInformation->ReplyListHead, ItemLink, ItemNext) {
         Element = CONTAINING_RECORD(ItemLink, SRB_QUEUE_ELEMENT, Link);
-        if(Element->Tag == Reply.Handle) {
+        if (Element->Tag == Reply.Handle) {
             /* Remove the element from the list once found*/
             RemoveEntryList(&Element->Link);
             break;
@@ -440,12 +442,16 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
     }
 
     // TODO: can we use this buffer directly?
-    if (StorPortGetSystemAddress(Element->DeviceExtension, Element->Srb, &SrbBuff)) {
+    // No, because of STOR_MAP_NON_READ_WRITE_BUFFERS
+    ULONG StorResult;
+    StorResult = StorPortGetSystemAddress(Element->DeviceExtension, Element->Srb, &SrbBuff);
+    if (STOR_STATUS_SUCCESS != StorResult) {
         Element->Srb->SrbStatus = SRB_STATUS_INTERNAL_ERROR;
         goto Exit;
     }
 
     if(IsReadSrb(Element->Srb)) {
+        // Preallocate the buffer?
         TempBuff = NbdMalloc(Element->ReadLength);
         if (!TempBuff) {
             Status = STATUS_INSUFFICIENT_RESOURCES;
