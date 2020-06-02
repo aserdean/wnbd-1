@@ -14,7 +14,8 @@
 #include "util.h"
 #include "userspace.h"
 
-VOID DrainDeviceQueue(PWNBD_SCSI_DEVICE Device, PLIST_ENTRY ListHead, PKSPIN_LOCK ListLock)
+VOID DrainDeviceQueue(PWNBD_SCSI_DEVICE Device, PLIST_ENTRY ListHead,
+                      PKSPIN_LOCK ListLock, PSCSI_DEVICE_INFORMATION DeviceInformation)
 {
     WNBD_LOG_LOUD(": Enter");
 
@@ -35,11 +36,17 @@ VOID DrainDeviceQueue(PWNBD_SCSI_DEVICE Device, PLIST_ENTRY ListHead, PKSPIN_LOC
         StorPortNotification(RequestComplete, Element->DeviceExtension,
                              Element->Srb);
         ExFreePool(Element);
+
+        KIRQL Irql = { 0 };
+        KeAcquireSpinLock(&DeviceInformation->StatsLock, &Irql);
+        DeviceInformation->Stats.AbortedUnsubmittedIORequests += 1;
+        KeReleaseSpinLock(&DeviceInformation->StatsLock, Irql);
     }
 }
 
 
-VOID SendAbortFailedForQueue(PLIST_ENTRY ListHead, PKSPIN_LOCK ListLock)
+VOID SendAbortFailedForQueue(PLIST_ENTRY ListHead, PKSPIN_LOCK ListLock,
+                             PSCSI_DEVICE_INFORMATION DeviceInformation)
 {
     WNBD_LOG_LOUD(": Enter");
 
@@ -60,6 +67,11 @@ VOID SendAbortFailedForQueue(PLIST_ENTRY ListHead, PKSPIN_LOCK ListLock)
             WnbdToStringSrbStatus(Element->Srb->SrbStatus));
         StorPortNotification(RequestComplete, Element->DeviceExtension,
                              Element->Srb);
+
+        KIRQL Irql2 = { 0 };
+        KeAcquireSpinLock(&DeviceInformation->StatsLock, &Irql2);
+        DeviceInformation->Stats.AbortedSubmittedIORequests += 1;
+        KeReleaseSpinLock(&DeviceInformation->StatsLock, Irql2);
     }
     KeReleaseSpinLock(ListLock, Irql);
 }
@@ -110,12 +122,12 @@ UCHAR DrainDeviceQueues(PVOID DeviceExtension,
     }
     PSCSI_DEVICE_INFORMATION Info = (PSCSI_DEVICE_INFORMATION)Device->ScsiDeviceExtension;
 
-    DrainDeviceQueue(Device, &Info->RequestListHead, &Info->RequestListLock);
+    DrainDeviceQueue(Device, &Info->RequestListHead, &Info->RequestListLock, Info);
     // Should we set those in-flight requests to SRB_STATUS_ABORT_FAILED?
     // We can't set them to SRB_STATUS_ABORTED because those requests have been
     // submitted and will most probably complete.
     // DrainDeviceQueue(Device, &Info->ReplyListHead, &Info->ReplyListLock);
-    SendAbortFailedForQueue(&Info->ReplyListHead, &Info->ReplyListLock);
+    SendAbortFailedForQueue(&Info->ReplyListHead, &Info->ReplyListLock, Info);
 
     SrbStatus = SRB_STATUS_SUCCESS;
 

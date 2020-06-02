@@ -491,6 +491,8 @@ NbdReadReply(INT Fd,
     }
     if (0 != Reply->Error) {
         // TODO: do we care about the actual error?
+        // We should probably exit when the signature does not match but not
+        // when the reply contains an error.
         WNBD_LOG_INFO("NBD reply contains error: %llu", Reply->Error);
         return STATUS_ABANDONED;
     }

@@ -51,6 +51,9 @@ typedef struct _SCSI_DEVICE_INFORMATION
     PVOID                       DeviceReplyThread;
     BOOLEAN                     HardTerminateDevice;
     BOOLEAN                     SoftTerminateDevice;
+
+    WNBD_STATS                  Stats;
+    KSPIN_LOCK                  StatsLock;
 } SCSI_DEVICE_INFORMATION, *PSCSI_DEVICE_INFORMATION;
 
 NTSTATUS

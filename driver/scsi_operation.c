@@ -338,6 +338,10 @@ WnbdPendElement(_In_ PVOID DeviceExtension,
     WNBD_LOG_LOUD(": Enter");
     NTSTATUS Status = STATUS_SUCCESS;
     PSCSI_DEVICE_INFORMATION ScsiInfo = (PSCSI_DEVICE_INFORMATION)ScsiDeviceExtension;
+
+    ScsiInfo->Stats.TotalReceivedIORequests += 1;
+    ScsiInfo->Stats.UnsubmittedIORequests += 1;
+
     PSRB_QUEUE_ELEMENT Element = (PSRB_QUEUE_ELEMENT)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(SRB_QUEUE_ELEMENT), 'DBNs');
     if (NULL == Element) {
         Status = STATUS_INSUFFICIENT_RESOURCES;

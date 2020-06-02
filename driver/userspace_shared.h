@@ -21,6 +21,7 @@ extern "C" {
 #define IOCTL_WNBD_UNMAP  CTL_CODE(FILE_DEVICE_WNBD, USER_WNBD_IOCTL_START+2, METHOD_BUFFERED, FILE_WRITE_ACCESS)
 #define IOCTL_WNBD_LIST   CTL_CODE(FILE_DEVICE_WNBD, USER_WNBD_IOCTL_START+3, METHOD_BUFFERED, FILE_WRITE_ACCESS)
 #define IOCTL_WNBD_DEBUG  CTL_CODE(FILE_DEVICE_WNBD, USER_WNBD_IOCTL_START+4, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+#define IOCTL_WNBD_STATS CTL_CODE(FILE_DEVICE_WNBD, USER_WNBD_IOCTL_START+5, METHOD_BUFFERED, FILE_WRITE_ACCESS)
 
 static const GUID WNBD_GUID = {
       0x949dd17c,
@@ -59,6 +60,17 @@ typedef struct _DISK_INFO_LIST {
     ULONG                   ActiveListCount;
     DISK_INFO          ActiveEntry[1];
 } DISK_INFO_LIST, *PDISK_INFO_LIST;
+
+typedef struct _WNBD_STATS {
+    UINT64 TotalReceivedIORequests;
+    UINT64 TotalSubmittedIORequests;
+    UINT64 TotalReceivedIOReplies;
+    UINT64 UnsubmittedIORequests;
+    UINT64 PendingSubmittedIORequests;
+    UINT64 AbortedSubmittedIORequests;
+    UINT64 AbortedUnsubmittedIORequests;
+    UINT64 CompletedAbortedIORequests;
+} WNBD_STATS, *PWNBD_STATS;
 
 #ifdef __cplusplus
 }

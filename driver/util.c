@@ -196,6 +196,13 @@ WnbdProcessDeviceThreadRequestsReads(_In_ PSCSI_DEVICE_INFORMATION DeviceInforma
                 &Status,
                 Element->Tag);
 
+    KIRQL Irql = { 0 };
+    KeAcquireSpinLock(&DeviceInformation->StatsLock, &Irql);
+    DeviceInformation->Stats.UnsubmittedIORequests -= 1;
+    DeviceInformation->Stats.TotalSubmittedIORequests += 1;
+    DeviceInformation->Stats.PendingSubmittedIORequests += 1;
+    KeReleaseSpinLock(&DeviceInformation->StatsLock, Irql);
+
     WNBD_LOG_LOUD(": Exit");
     return Status;
 }
@@ -222,6 +229,13 @@ WnbdProcessDeviceThreadRequestsWrites(_In_ PSCSI_DEVICE_INFORMATION DeviceInform
                      Buffer,
                      Element->Tag);
     }
+
+    KIRQL Irql = { 0 };
+    KeAcquireSpinLock(&DeviceInformation->StatsLock, &Irql);
+    DeviceInformation->Stats.UnsubmittedIORequests -= 1;
+    DeviceInformation->Stats.TotalSubmittedIORequests += 1;
+    DeviceInformation->Stats.PendingSubmittedIORequests += 1;
+    KeReleaseSpinLock(&DeviceInformation->StatsLock, Irql);
 
     WNBD_LOG_LOUD(": Exit");
     return Status;
@@ -454,6 +468,7 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
         WNBD_LOG_ERROR("Could not get SRB %p 0x%llx data buffer. Error: %d.",
                        Element->Srb, Element->Tag, error);
         Element->Srb->SrbStatus = SRB_STATUS_INTERNAL_ERROR;
+        CloseConnection(DeviceInformation);
         goto Exit;
     }
 
@@ -462,6 +477,7 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
         TempBuff = NbdMalloc(Element->ReadLength);
         if (!TempBuff) {
             Status = STATUS_INSUFFICIENT_RESOURCES;
+            CloseConnection(DeviceInformation);
             goto Exit;
         }
 
@@ -477,16 +493,23 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
         }
     }
     // TODO: rename ReadLength to DataLength
+    // TODO: check NBD error code.
     Element->Srb->DataTransferLength = Element->ReadLength;
     Element->Srb->SrbStatus = SRB_STATUS_SUCCESS;
+
+    KeAcquireSpinLock(&DeviceInformation->StatsLock, &Irql);
+    DeviceInformation->Stats.TotalReceivedIOReplies += 1;
+    DeviceInformation->Stats.PendingSubmittedIORequests -= 1;
     if(Element->Aborted) {
         WNBD_LOG_WARN("Got reply for aborted request: %p 0x%llx.",
                       Element->Srb, Element->Tag);
+        DeviceInformation->Stats.CompletedAbortedIORequests -= 1;
     }
     else {
         WNBD_LOG_LOUD("Successfully completed request %p 0x%llx.",
                       Element->Srb, Element->Tag);
     }
+    KeReleaseSpinLock(&DeviceInformation->StatsLock, Irql);
 
 Exit:
     if(TempBuff) {
