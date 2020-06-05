@@ -54,6 +54,7 @@ typedef struct _SCSI_DEVICE_INFORMATION
 
     WNBD_STATS                  Stats;
     KSPIN_LOCK                  StatsLock;
+    PVOID                       PreallocatedBuffer;
 } SCSI_DEVICE_INFORMATION, *PSCSI_DEVICE_INFORMATION;
 
 NTSTATUS

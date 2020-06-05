@@ -145,6 +145,8 @@ WnbdSetInquiryData(_Inout_ PINQUIRYDATA InquiryData)
     WNBD_LOG_LOUD(": Exit");
 }
 
+#define MallocT(S) ExAllocatePoolWithTag(NonPagedPoolNx, S, 'pDBR')
+
 NTSTATUS
 WnbdInitializeScsiInfo(_In_ PSCSI_DEVICE_INFORMATION ScsiInfo)
 {
@@ -164,6 +166,11 @@ WnbdInitializeScsiInfo(_In_ PSCSI_DEVICE_INFORMATION ScsiInfo)
 
     ScsiInfo->HardTerminateDevice = FALSE;
     ScsiInfo->SoftTerminateDevice = FALSE;
+    ScsiInfo->PreallocatedBuffer = MallocT(((UINT)MEM_SIZE));
+    if (!ScsiInfo->PreallocatedBuffer) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto Exit;
+    }
 
     Status = PsCreateSystemThread(&request_thread_handle, (ACCESS_MASK)0L, NULL,
                                   NULL, NULL, WnbdDeviceRequestThread, ScsiInfo);

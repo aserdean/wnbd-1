@@ -16,6 +16,8 @@
 #define WNBD_DBG_INFO     DPFLTR_INFO_LEVEL
 #define WNBD_DBG_LOUD     (DPFLTR_INFO_LEVEL + 1)
 
+#define MEM_SIZE   ( 256 * 1024 * 1024 )
+
 VOID
 WnbdSetLogLevel(_In_ UINT32 Level);
 
