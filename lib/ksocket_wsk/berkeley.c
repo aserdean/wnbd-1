@@ -618,7 +618,7 @@ int Send(int sockfd, const void* buf, size_t len, int flags, PNTSTATUS error)
 {
   NTSTATUS Status;
   PKSOCKET Socket = KsArray[FROM_SOCKETFD(sockfd)];
-  flags |= WSK_FLAG_NODELAY;
+  //flags |= WSK_FLAG_NODELAY;
 
   ULONG Length = (ULONG)len;
   Status = KsSend(Socket, (PVOID)buf, &Length, flags);
