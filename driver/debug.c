@@ -35,6 +35,12 @@ WnbdLog(UINT32 Level,
         PCHAR Format,
         ...)
 {
+    UNREFERENCED_PARAMETER(Level);
+    UNREFERENCED_PARAMETER(FuncName);
+    UNREFERENCED_PARAMETER(Line);
+    UNREFERENCED_PARAMETER(Format);
+#if DBG
+
     va_list Args;
     CHAR Buf[WNBD_LOG_BUFFER_SIZE];
 
@@ -52,4 +58,5 @@ WnbdLog(UINT32 Level,
     va_end(Args);
 
     DbgPrintEx(DPFLTR_SCSIMINIPORT_ID, Level, "%s:%lu %s\n", FuncName, Line, Buf);
+#endif
 }
