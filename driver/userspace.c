@@ -169,11 +169,18 @@ WnbdInitializeScsiInfo(_In_ PSCSI_DEVICE_INFORMATION ScsiInfo)
 
     ScsiInfo->HardTerminateDevice = FALSE;
     ScsiInfo->SoftTerminateDevice = FALSE;
-    ScsiInfo->PreallocatedBuffer = MallocT(((UINT)MEM_SIZE));
-    if (!ScsiInfo->PreallocatedBuffer) {
+    ScsiInfo->ReadPreallocatedBuffer = MallocT(((UINT)MEM_SIZE));
+    if (!ScsiInfo->ReadPreallocatedBuffer) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto Exit;
     }
+    ScsiInfo->ReadPreallocatedBufferLength = MEM_SIZE;
+    ScsiInfo->WritePreallocatedBuffer = MallocT(((UINT)MEM_SIZE));
+    if (!ScsiInfo->WritePreallocatedBuffer) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto Exit;
+    }
+    ScsiInfo->WritePreallocatedBufferLength = MEM_SIZE;
 
     Status = PsCreateSystemThread(&request_thread_handle, (ACCESS_MASK)0L, NULL,
                                   NULL, NULL, WnbdDeviceRequestThread, ScsiInfo);

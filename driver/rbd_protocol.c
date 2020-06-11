@@ -420,12 +420,13 @@ NbdWriteStat(INT Fd,
              ULONG Length,
              PNTSTATUS IoStatus,
              PVOID SystemBuffer,
+             PVOID PreallocatedBuffer,
+             ULONG PreallocatedLength,
              UINT64 Handle)
 {
     WNBD_LOG_LOUD(": Enter");
 
     NTSTATUS Status = STATUS_SUCCESS;
-    PCHAR Buf = NULL;
     if (SystemBuffer == NULL) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto Exit;
@@ -440,12 +441,17 @@ NbdWriteStat(INT Fd,
     Request.Length = RtlUlongByteSwap(Length);
     Request.From = RtlUlonglongByteSwap(Offset);
     Request.Handle = Handle;
-    Buf = NbdMalloc(Length + sizeof(NBD_REQUEST));
-
-    if (NULL == Buf) {
-        WNBD_LOG_ERROR("Insufficient resources");
-        Status = STATUS_INSUFFICIENT_RESOURCES;
-        goto Exit;
+    UINT Needed = Length + sizeof(NBD_REQUEST);
+    if (PreallocatedLength < Needed) {
+        PCHAR Buf = NULL;
+        Buf = NbdMalloc(Length + sizeof(NBD_REQUEST));
+        if (NULL == Buf) {
+            WNBD_LOG_ERROR("Insufficient resources");
+            Status = STATUS_INSUFFICIENT_RESOURCES;
+            goto Exit;
+        }
+        ExFreePool(PreallocatedBuffer);
+        PreallocatedBuffer = Buf;
     }
 
     if (-1 == Fd) {
@@ -454,20 +460,17 @@ NbdWriteStat(INT Fd,
         goto Exit;
     }
 #pragma warning(disable:6386)
-    RtlCopyMemory(Buf, &Request, sizeof(NBD_REQUEST));
+    RtlCopyMemory(PreallocatedBuffer, &Request, sizeof(NBD_REQUEST));
 #pragma warning(default:6386)
-    RtlCopyMemory((Buf + sizeof(NBD_REQUEST)), SystemBuffer, Length);
+    RtlCopyMemory(((PCHAR)PreallocatedBuffer + sizeof(NBD_REQUEST)), SystemBuffer, Length);
 
-    if (-1 == RbdWriteExact(Fd, Buf, sizeof(NBD_REQUEST) + Length, &error)) {
+    if (-1 == RbdWriteExact(Fd, PreallocatedBuffer, sizeof(NBD_REQUEST) + Length, &error)) {
         WNBD_LOG_ERROR("Could not send request for NBD_CMD_WRITE");
         Status = error;
         goto Exit;
     }
 
 Exit:
-    if (NULL != Buf) {
-        NbdFree(Buf);
-    }
     *IoStatus = Status;
     WNBD_LOG_LOUD(": Exit");
 }

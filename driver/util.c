@@ -48,9 +48,14 @@ WnbdDeleteScsiInformation(_In_ PVOID ScsiInformation)
         ScsiInfo->UserEntry = NULL;
     }
 
-    if (ScsiInfo->PreallocatedBuffer) {
-        ExFreePool(ScsiInfo->PreallocatedBuffer);
-        ScsiInfo->PreallocatedBuffer = NULL;
+    if (ScsiInfo->ReadPreallocatedBuffer) {
+        ExFreePool(ScsiInfo->ReadPreallocatedBuffer);
+        ScsiInfo->ReadPreallocatedBuffer = NULL;
+    }
+
+    if (ScsiInfo->WritePreallocatedBuffer) {
+        ExFreePool(ScsiInfo->WritePreallocatedBuffer);
+        ScsiInfo->WritePreallocatedBuffer = NULL;
     }
 
     if (-1 != ScsiInfo->Socket) {
@@ -231,6 +236,8 @@ WnbdProcessDeviceThreadRequestsWrites(_In_ PSCSI_DEVICE_INFORMATION DeviceInform
                      Element->ReadLength,
                      &Status,
                      Buffer,
+                     DeviceInformation->WritePreallocatedBuffer,
+                     DeviceInformation->WritePreallocatedBufferLength,
                      Element->Tag);
     }
 
@@ -491,17 +498,18 @@ WnbdProcessDeviceThreadReplies(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
 
     if(IsReadSrb(Element->Srb)) {
         // Preallocate the buffer?
-        if (Element->ReadLength > MEM_SIZE) {
+        if (Element->ReadLength > DeviceInformation->ReadPreallocatedBufferLength) {
             TempBuff = NbdMalloc(Element->ReadLength);
             if (!TempBuff) {
                 Status = STATUS_INSUFFICIENT_RESOURCES;
                 CloseConnection(DeviceInformation);
                 goto Exit;
             }
-            ExFreePool(DeviceInformation->PreallocatedBuffer);
-            DeviceInformation->PreallocatedBuffer = TempBuff;
+            DeviceInformation->ReadPreallocatedBufferLength = Element->ReadLength;
+            ExFreePool(DeviceInformation->ReadPreallocatedBuffer);
+            DeviceInformation->ReadPreallocatedBuffer = TempBuff;
         } else {
-            TempBuff = DeviceInformation->PreallocatedBuffer;
+            TempBuff = DeviceInformation->ReadPreallocatedBuffer;
         }
 
         if (-1 == RbdReadExact(DeviceInformation->Socket, TempBuff, Element->ReadLength, &error)) {
