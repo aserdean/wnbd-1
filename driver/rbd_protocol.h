@@ -96,7 +96,7 @@ NbdWriteStat(_In_ INT Fd,
              _Out_ PNTSTATUS IoStatus,
              _In_ PVOID SystemBuffer,
              _In_ PVOID PreallocatedBuffer,
-             _In_ ULONG PreallocatedLength,
+             _In_ PULONG PreallocatedLength,
              _In_ UINT64 Handle);
 
 INT

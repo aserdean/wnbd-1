@@ -421,7 +421,7 @@ NbdWriteStat(INT Fd,
              PNTSTATUS IoStatus,
              PVOID SystemBuffer,
              PVOID PreallocatedBuffer,
-             ULONG PreallocatedLength,
+             PULONG PreallocatedLength,
              UINT64 Handle)
 {
     WNBD_LOG_LOUD(": Enter");
@@ -442,15 +442,16 @@ NbdWriteStat(INT Fd,
     Request.From = RtlUlonglongByteSwap(Offset);
     Request.Handle = Handle;
     UINT Needed = Length + sizeof(NBD_REQUEST);
-    if (PreallocatedLength < Needed) {
+    if (*PreallocatedLength < Needed) {
         PCHAR Buf = NULL;
-        Buf = NbdMalloc(Length + sizeof(NBD_REQUEST));
+        Buf = NbdMalloc(Needed);
         if (NULL == Buf) {
             WNBD_LOG_ERROR("Insufficient resources");
             Status = STATUS_INSUFFICIENT_RESOURCES;
             goto Exit;
         }
         ExFreePool(PreallocatedBuffer);
+        *PreallocatedLength = Needed;
         PreallocatedBuffer = Buf;
     }
 
