@@ -33,7 +33,6 @@ WnbdDeleteScsiInformation(_In_ PVOID ScsiInformation)
         Element->Srb->SrbStatus = SRB_STATUS_ABORTED;
         PWNBD_SCSI_DEVICE Device = (PWNBD_SCSI_DEVICE)ScsiInfo->Device;
         InterlockedDecrement(&Device->OutstandingIoCount);
-        ExFreePool(Element);
     }
 
     while ((Request = ExInterlockedRemoveHeadList(&ScsiInfo->ReplyListHead, &ScsiInfo->ReplyListLock)) != NULL) {
@@ -53,6 +52,8 @@ WnbdDeleteScsiInformation(_In_ PVOID ScsiInformation)
         ScsiInfo->InquiryData = NULL;
     }
 
+    DisconnectConnection(ScsiInfo);
+
     ExDeleteResourceLite(&ScsiInfo->SocketMutex);
 
     if(ScsiInfo->UserEntry) {
@@ -68,12 +69,6 @@ WnbdDeleteScsiInformation(_In_ PVOID ScsiInformation)
     if (ScsiInfo->WritePreallocatedBuffer) {
         ExFreePool(ScsiInfo->WritePreallocatedBuffer);
         ScsiInfo->WritePreallocatedBuffer = NULL;
-    }
-
-    if (-1 != ScsiInfo->Socket) {
-        WNBD_LOG_INFO("Closing socket FD: %d", ScsiInfo->Socket);
-        Close(ScsiInfo->Socket);
-        ScsiInfo->Socket = -1;
     }
 
     ExReleaseResourceLite(&ScsiInfo->GlobalInformation->ConnectionMutex);
@@ -93,6 +88,9 @@ WnbdDeleteDevices(_In_ PWNBD_EXTENSION Ext,
     ASSERT(Ext);
     PWNBD_SCSI_DEVICE Device = NULL;
     PLIST_ENTRY Link, Next;
+    if (NULL == Ext->GlobalInformation) {
+        return;
+    }
     KeEnterCriticalRegion();
     ExAcquireResourceSharedLite(&Ext->DeviceResourceLock, TRUE);
     ExAcquireResourceExclusiveLite(&((PGLOBAL_INFORMATION)Ext->GlobalInformation)->ConnectionMutex, TRUE);
@@ -365,8 +363,6 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
         }
 
         if (Status) {
-            Element->Srb->DataTransferLength = 0;
-            Element->Srb->SrbStatus = SRB_STATUS_TIMEOUT;
             WNBD_LOG_INFO("FD failed with: %x. Address: %p Tag: 0x%llx",
                           Status, Element->Srb, Element->Tag);
             if (STATUS_CONNECTION_RESET == Status ||
@@ -374,7 +370,6 @@ WnbdProcessDeviceThreadRequests(_In_ PSCSI_DEVICE_INFORMATION DeviceInformation)
                 STATUS_CONNECTION_ABORTED == Status) {
                 CloseConnection(DeviceInformation);
             }
-            ExFreePool(Element);
         }
     }
 

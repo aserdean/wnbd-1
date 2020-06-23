@@ -55,8 +55,9 @@ VOID DrainDeviceQueue(PWNBD_SCSI_DEVICE Device, PLIST_ENTRY ListHead,
                 WnbdToStringSrbStatus(Element->Srb->SrbStatus));
             StorPortNotification(RequestComplete, Element->DeviceExtension,
                 Element->Srb);
+
+            ExFreePool(Element);
         }
-        ExFreePool(Element);
 
         InterlockedIncrement64(&DeviceInformation->Stats.AbortedUnsubmittedIORequests);
         WnbdReleaseSemaphore(&DeviceInformation->RequestSemaphore, 0, 1, FALSE);

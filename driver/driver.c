@@ -186,6 +186,7 @@ WnbdDispatchPnp(PDEVICE_OBJECT DeviceObject,
         break;
 
     case IRP_MN_REMOVE_DEVICE:
+        WnbdDeleteGlobalInformation(GlobalInformation);
         WNBD_LOG_INFO("IRP_MN_REMOVE_DEVICE");
         break;
     }
