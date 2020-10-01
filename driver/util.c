@@ -96,8 +96,9 @@ WnbdCleanupAllDevices(_In_ PWNBD_EXTENSION DeviceExtension)
     WNBD_LOG_LOUD(": Exit");
 }
 
+_Use_decl_annotations_
 BOOLEAN
-WnbdAcquireDevice(_In_ PWNBD_SCSI_DEVICE Device)
+WnbdAcquireDevice(PWNBD_SCSI_DEVICE Device)
 {
     // TODO: limit the scopes of critical regions.
     BOOLEAN Acquired = FALSE;
@@ -109,8 +110,9 @@ WnbdAcquireDevice(_In_ PWNBD_SCSI_DEVICE Device)
     return Acquired;
 }
 
+_Use_decl_annotations_
 VOID
-WnbdReleaseDevice(_In_ PWNBD_SCSI_DEVICE Device)
+WnbdReleaseDevice(PWNBD_SCSI_DEVICE Device)
 {
     KeEnterCriticalRegion();
     if (Device)

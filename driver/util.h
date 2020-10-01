@@ -25,10 +25,12 @@ WnbdCleanupAllDevices(_In_ PWNBD_EXTENSION DeviceExtension);
 
 // Increments the device rundown protection reference count, preventing
 // it from being cleaned up.
+_IRQL_requires_max_(APC_LEVEL)
 BOOLEAN
 WnbdAcquireDevice(_In_ PWNBD_SCSI_DEVICE Device);
 // Decrements the reference count. All "WnbdAcquireDevice" calls must
 // be paired with a "WnbdReleaseDevice" call.
+_IRQL_requires_max_(APC_LEVEL)
 VOID
 WnbdReleaseDevice(_In_ PWNBD_SCSI_DEVICE Device);
 // Signals the device cleanup thread, setting the "*TerminateDevice" flags
